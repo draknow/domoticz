@@ -88,7 +88,7 @@ std::vector<std::string> CRtl433::ParseCSVLine(const char *input)
 				field += *s;
 			}
 		}
-		else if (*s == ',')
+		else if (*s == ',' || *s == '\n')
 		{
 			line.push_back(field);
 			field.clear();
@@ -409,6 +409,7 @@ void CRtl433::Do_Work()
 		std::vector<std::string> headers;
 		std::string headerLine = "";
 		m_sLastLine = "";
+		int offset;
 
 		std::string szFlags = "-F csv -M newmodel -C si " + m_cmdline; // newmodel used (-M newmodel) and international system used (-C si) -f 433.92e6 -f 868.24e6 -H 60 -d 0
 #ifdef WIN32
@@ -446,14 +447,22 @@ void CRtl433::Do_Work()
 #endif
 		bool bFirstTime = true;
 		m_time_last_received = time(NULL);
+		offset = 0;
 		while (!IsStopRequested(100))
 		{
 			if (m_hPipe == NULL)
 				break;
 			//size_t bread = read(fd, (char*)&line, sizeof(line));
-			line[0] = 0;
-			if (fgets(line, sizeof(line) - 1, m_hPipe) != NULL)
+			if (!offset)
+				line[0] = 0;
+			if (fgets(line+offset, sizeof(line) - 1, m_hPipe) != NULL)
 			{
+				if (line[strlen(line)-1] != '\n') //input truncated, read again
+				{
+					offset=strlen(line);
+					continue;
+				}
+				offset = 0;
 				bHaveReceivedData = true;
 
 				if (bFirstTime)
@@ -469,13 +478,16 @@ void CRtl433::Do_Work()
 					_log.Log(LOG_STATUS, "Rtl433: Unhandled sensor reading, please report: (%s|%s)", headerLine.c_str(), line);
 				}
 			}
-			else { //fgets
-				if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) {
+			else
+			{
+				if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) 
+				{
 					continue;
 				}
 				break; // bail out, subprocess has failed
-			}
+			} //fgets
 		} // while !IsStopRequested()
+
 		if (m_hPipe)
 		{
 #ifdef WIN32
@@ -485,7 +497,9 @@ void CRtl433::Do_Work()
 #endif
 			m_hPipe = NULL;
 		}
-		if (!IsStopRequested(0)) {
+
+		if (!IsStopRequested(0)) 
+		{	
 			// sleep 30 seconds before retrying
 			if (!bHaveReceivedData)
 			{
@@ -499,13 +513,14 @@ void CRtl433::Do_Work()
 			{
 				_log.Log(LOG_STATUS, "Rtl433: Failure! Retrying in 30 seconds...");
 			}
+			
 			for (int i = 0; i < 30; i++)
 			{
 				if (IsStopRequested(1000))
 					break;
+			}
 		}
-	}
-} // while !IsStopRequested()
+	} // while !IsStopRequested()
 	_log.Log(LOG_STATUS, "Rtl433: Worker stopped...");
 }
 
