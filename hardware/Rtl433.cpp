@@ -405,11 +405,15 @@ void CRtl433::Do_Work()
 	bool bHaveReceivedData = false;
 	while (!IsStopRequested(0))
 	{
-		char line[2048];
 		std::vector<std::string> headers;
 		std::string headerLine = "";
 		m_sLastLine = "";
-		int offset;
+		size_t len = 128;
+		int pos = 0;
+		char *line;
+
+		if ((line = (char *)malloc(len)) == NULL)
+			break;
 
 		std::string szFlags = "-F csv -M newmodel -C si " + m_cmdline; // newmodel used (-M newmodel) and international system used (-C si) -f 433.92e6 -f 868.24e6 -H 60 -d 0
 #ifdef WIN32
@@ -447,22 +451,28 @@ void CRtl433::Do_Work()
 #endif
 		bool bFirstTime = true;
 		m_time_last_received = time(NULL);
-		offset = 0;
+
 		while (!IsStopRequested(100))
 		{
 			if (m_hPipe == NULL)
 				break;
-			//size_t bread = read(fd, (char*)&line, sizeof(line));
-			if (!offset)
-				line[0] = 0;
-			if (fgets(line+offset, sizeof(line) - 1, m_hPipe) != NULL)
+
+			if (fgets(line + pos, len - pos - 1, m_hPipe) != NULL)
 			{
-				if (line[strlen(line)-1] != '\n') //input truncated, read again
+				pos = strlen(line);
+				if (line[pos - 1] != '\n') //input truncated, read more
 				{
-					offset=strlen(line);
+					if (pos >= len - 2 ) //line buffer too small, make it larger
+					{
+						len += 128;
+						if (len > 2048)
+							break; //give up, input is not CSV or is unreasonably long
+						if ((line = (char *)realloc(line,len)) == NULL)
+							break;
+					}
 					continue;
 				}
-				offset = 0;
+				pos = 0;
 				bHaveReceivedData = true;
 
 				if (bFirstTime)
@@ -481,13 +491,13 @@ void CRtl433::Do_Work()
 			else
 			{
 				if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) 
-				{
 					continue;
-				}
-				break; // bail out, subprocess has failed
+				else
+					break; // bail out, subprocess has failed
 			} //fgets
 		} // while !IsStopRequested()
 
+		free(line);
 		if (m_hPipe)
 		{
 #ifdef WIN32
@@ -498,8 +508,8 @@ void CRtl433::Do_Work()
 			m_hPipe = NULL;
 		}
 
-		if (!IsStopRequested(0)) 
-		{	
+		if (!IsStopRequested(0))
+		{
 			// sleep 30 seconds before retrying
 			if (!bHaveReceivedData)
 			{
@@ -513,7 +523,7 @@ void CRtl433::Do_Work()
 			{
 				_log.Log(LOG_STATUS, "Rtl433: Failure! Retrying in 30 seconds...");
 			}
-			
+
 			for (int i = 0; i < 30; i++)
 			{
 				if (IsStopRequested(1000))
